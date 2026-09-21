@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,8 +20,11 @@ def test_version() -> None:
     assert __version__ == "0.1.0"
 
 
-def test_settings_defaults() -> None:
-    settings = Settings(_env_file=None)
+def test_settings_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SENTINELIQ_ENV", raising=False)
+    monkeypatch.delenv("SENTINELIQ_PORT", raising=False)
+    settings = Settings()
     assert settings.port == 8000
     assert settings.env == "development"
 
@@ -47,7 +51,8 @@ def test_health_rejects_post(client: TestClient) -> None:
     assert response.status_code == 405
 
 
-def test_invalid_port_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invalid_port_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SENTINELIQ_PORT", "not-a-port")
     with pytest.raises(ValidationError):
-        Settings(_env_file=None)
+        Settings()
