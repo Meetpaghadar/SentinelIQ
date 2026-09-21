@@ -1,0 +1,12 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      SENTINELIQ_ENV: ${SENTINELIQ_ENV:-development}
+      SENTINELIQ_LOG_LEVEL: ${SENTINELIQ_LOG_LEVEL:-INFO}
+      SENTINELIQ_HOST: 0.0.0.0
+      SENTINELIQ_PORT: 8000
+    ports:
+      - "${SENTINELIQ_PORT:-8000}:8000"
