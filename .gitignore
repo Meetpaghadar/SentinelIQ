@@ -42,3 +42,7 @@ docker-data/
 # Logs
 *.log
 logs/
+
+# Type checkers
+.mypy_cache/
+.pyright/

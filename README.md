@@ -2,56 +2,52 @@
 
 Enterprise knowledge intelligence platform. Current milestone: **M0 — Engineering Foundation**.
 
-M0 provides a runnable HTTP process, health/readiness endpoints, tests, and quality gates. It does not implement identity, knowledge retrieval, or RAG.
+M0 is a runnable API process with health/readiness checks, typed settings, structured logging, and quality gates. It does not implement identity, knowledge retrieval, or RAG.
 
 ## Layout
 
 ```
 src/sentineliq/   Python package
 tests/            Pytest suite
-config/           Non-secret defaults (not yet loaded by the app)
+config/           File defaults (environment variables override these)
 docker/           Container build files
 docs/adr/         Architecture decision records
-scripts/          Operator and developer scripts
 ```
 
 ## Setup
 
-Python 3.10+ is required.
+Python 3.10 is required.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 copy .env.example .env
 ```
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env
-```
-
-## Run
+## Development commands
 
 ```powershell
-sentineliq
+python -m sentineliq.cli config
+python -m sentineliq.cli serve
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
+python -m pyright
 ```
 
-Then:
-
-- `GET http://127.0.0.1:8000/health` → `{"status":"ok"}`
-- `GET http://127.0.0.1:8000/ready` → `{"status":"ready"}`
-
-## Quality gates
+## API
 
 ```powershell
-pytest
-ruff format --check src tests
-ruff check src tests
-mypy
+python -m sentineliq.cli serve
 ```
+
+- `GET /health` → `{"status":"healthy","service":"SentinelIQ"}`
+- `GET /ready` → `{"status":"ready"}`
+
+Responses include `X-Correlation-ID`. Send that header to preserve a caller-supplied ID.
+
+Readiness means the process loaded configuration. Postgres and Redis are not part of M0.
 
 ## Docker
 
@@ -59,4 +55,4 @@ mypy
 docker compose up --build
 ```
 
-Configuration is environment variables (`SENTINELIQ_*`). See `.env.example`.
+Only the API container is defined. Configuration is `SENTINELIQ_*` environment variables, which override `config/settings.toml` and `.env`.

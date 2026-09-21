@@ -1,12 +1,16 @@
 services:
-  app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+  postgres:
+    image: postgres:18
+    container_name: sentineliq-postgres
+    restart: unless-stopped
     environment:
-      SENTINELIQ_ENV: ${SENTINELIQ_ENV:-development}
-      SENTINELIQ_LOG_LEVEL: ${SENTINELIQ_LOG_LEVEL:-INFO}
-      SENTINELIQ_HOST: 0.0.0.0
-      SENTINELIQ_PORT: 8000
+      POSTGRES_DB: sentineliq
+      POSTGRES_USER: sentineliq
+      POSTGRES_PASSWORD: sentineliq_dev
     ports:
-      - "${SENTINELIQ_PORT:-8000}:8000"
+      - "5433:5432"
+    volumes:
+      - sentineliq_postgres_data:/var/lib/postgresql
+
+volumes:
+  sentineliq_postgres_data:
