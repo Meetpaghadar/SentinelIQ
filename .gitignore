@@ -28,7 +28,7 @@ dist/
 .env.local
 *.pem
 *.key
-
+data/documents/*
 # IDE / OS
 .idea/
 .vscode/

@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Generator
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -9,7 +10,7 @@ from sentineliq.models import Permission, Role, RolePermission, Tenant, User, Us
 
 
 @pytest.fixture
-def db() -> Session:
+def db() -> Generator[Session, None, None]:
     connection = engine.connect()
     transaction = connection.begin()
     session = Session(bind=connection)

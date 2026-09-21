@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sentineliq.db.base import Base
 
 if TYPE_CHECKING:
+    from sentineliq.models.document import Document
     from sentineliq.models.role import Role
     from sentineliq.models.user import User
 
@@ -44,6 +45,11 @@ class Tenant(Base):
     )
 
     roles: Mapped[list["Role"]] = relationship(
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
+
+    documents: Mapped[list["Document"]] = relationship(
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
