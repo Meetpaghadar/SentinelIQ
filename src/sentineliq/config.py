@@ -16,15 +16,20 @@ from pydantic_settings import (
 
 def _load_toml_defaults() -> dict[str, Any]:
     path = Path("config/settings.toml")
+
     if not path.is_file():
         return {}
+
     with path.open("rb") as handle:
         payload = tomllib.load(handle)
+
     app = payload.get("app", {})
     defaults: dict[str, Any] = {}
+
     for key in ("env", "log_level", "host", "port"):
         if key in app:
             defaults[key] = app[key]
+
     return defaults
 
 
@@ -33,7 +38,11 @@ class TomlFileSource(PydanticBaseSettingsSource):
         super().__init__(settings_cls)
         self._data = _load_toml_defaults()
 
-    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+    def get_field_value(
+        self,
+        field: FieldInfo,
+        field_name: str,
+    ) -> tuple[Any, str, bool]:
         value = self._data.get(field_name)
         return value, field_name, False
 
@@ -48,10 +57,18 @@ class TomlFileSource(PydanticBaseSettingsSource):
 
     def __call__(self) -> dict[str, Any]:
         values: dict[str, Any] = {}
+
         for field_name, field in self.settings_cls.model_fields.items():
             value, key, is_complex = self.get_field_value(field, field_name)
+
             if value is not None:
-                values[key] = self.prepare_field_value(field_name, field, value, is_complex)
+                values[key] = self.prepare_field_value(
+                    field_name,
+                    field,
+                    value,
+                    is_complex,
+                )
+
         return values
 
 
@@ -63,13 +80,47 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    env: str = Field(default="development", validation_alias="SENTINELIQ_ENV")
-    log_level: str = Field(default="INFO", validation_alias="SENTINELIQ_LOG_LEVEL")
-    host: str = Field(default="0.0.0.0", validation_alias="SENTINELIQ_HOST")
-    port: int = Field(default=8000, validation_alias="SENTINELIQ_PORT")
+    env: str = Field(
+        default="development",
+        validation_alias="SENTINELIQ_ENV",
+    )
+
+    log_level: str = Field(
+        default="INFO",
+        validation_alias="SENTINELIQ_LOG_LEVEL",
+    )
+
+    host: str = Field(
+        default="0.0.0.0",
+        validation_alias="SENTINELIQ_HOST",
+    )
+
+    port: int = Field(
+        default=8000,
+        validation_alias="SENTINELIQ_PORT",
+    )
+
     database_url: str | None = Field(
         default=None,
         validation_alias="SENTINELIQ_DATABASE_URL",
+    )
+
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias="SENTINELIQ_OPENAI_API_KEY",
+    )
+
+    embedding_model: str = Field(
+        default="text-embedding-3-small",
+        validation_alias="SENTINELIQ_EMBEDDING_MODEL",
+    )
+    generation_model: str = Field(
+        default="gpt-5.4-nano",
+        validation_alias="SENTINELIQ_GENERATION_MODEL",
+    )
+    retrieval_min_similarity: float = Field(
+        default=0.20,
+        validation_alias="SENTINELIQ_RETRIEVAL_MIN_SIMILARITY",
     )
 
     @classmethod
@@ -101,8 +152,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
-
-database_url: str = Field(
-    validation_alias="SENTINELIQ_DATABASE_URL",
-)
