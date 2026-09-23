@@ -32,10 +32,11 @@ class EmbeddingService:
 
         return embeddings
 
+    def embed_documents(
+        self,
+        texts: list[str],
+    ) -> list[list[float]]:
+        return self.embed_texts(texts)
+
     def embed_query(self, query: str) -> list[float]:
-        query = query.strip()
-
-        if not query:
-            raise ValueError("Query cannot be empty")
-
         return self.embed_texts([query])[0]
