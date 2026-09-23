@@ -18,6 +18,7 @@ class Citation:
     version_number: int
     page_number: int | None
     chunk_id: UUID
+    excerpt: str
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ class RAGService:
                 version_number=result.version_number,
                 page_number=result.page_number,
                 chunk_id=result.chunk_id,
+                excerpt=self._build_excerpt(result.content),
             )
             for index, result in enumerate(results, start=1)
             if index in used_numbers
@@ -130,3 +132,15 @@ class RAGService:
         numbers = {int(match) for match in re.findall(r"\[(\d+)\]", answer)}
 
         return {number for number in numbers if 1 <= number <= maximum}
+
+    @staticmethod
+    def _build_excerpt(
+        content: str,
+        maximum_length: int = 300,
+    ) -> str:
+        cleaned = " ".join(content.split())
+
+        if len(cleaned) <= maximum_length:
+            return cleaned
+
+        return cleaned[:maximum_length].rstrip() + "..."

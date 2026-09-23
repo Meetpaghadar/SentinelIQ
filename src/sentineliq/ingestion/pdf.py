@@ -27,7 +27,8 @@ def extract_pdf(file_path: Path) -> ExtractedPdf:
     with pymupdf.open(file_path) as pdf:
         for index in range(pdf.page_count):
             page = pdf.load_page(index)
-            text = cast(str, page.get_text("text")).strip()
+            text = cast(str, page.get_text("text"))
+            text = text.replace("\x00", "").strip()
 
             if not text:
                 continue

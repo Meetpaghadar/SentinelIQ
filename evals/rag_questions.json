@@ -1,0 +1,43 @@
+[
+    {
+      "question": "Why is writing useful for thinking?",
+      "expected_document": "JP Essay Writing",
+      "answerable": true,
+      "expected_facts": [
+        "writing extends memory",
+        "writing helps clarify thinking"
+      ]
+    },
+    {
+      "question": "How does writing extend your memory?",
+      "expected_document": "JP Essay Writing",
+      "answerable": true,
+      "expected_facts": [
+        "writing extends memory"
+      ]
+    },
+    {
+      "question": "What is a large language model?",
+      "expected_document": "NLP standford",
+      "answerable": true,
+      "expected_facts": []
+    },
+    {
+      "question": "What is perplexity and how is it used to evaluate language models?",
+      "expected_document": "NLP standford",
+      "answerable": true,
+      "expected_facts": []
+    },
+    {
+      "question": "What advice is given about upskilling?",
+      "expected_document": "Advice on Upskilling",
+      "answerable": true,
+      "expected_facts": []
+    },
+    {
+      "question": "How do I configure an AWS VPC with Terraform?",
+      "expected_document": null,
+      "answerable": false,
+      "expected_facts": []
+    }
+  ]

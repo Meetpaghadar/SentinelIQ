@@ -1,0 +1,26 @@
+[
+    {
+      "question": "Why is writing useful for thinking?",
+      "expected_pages": [2, 3]
+    },
+    {
+      "question": "How does writing extend your memory?",
+      "expected_pages": [2]
+    },
+    {
+      "question": "How does writing help organize ideas?",
+      "expected_pages": [2, 3]
+    },
+    {
+      "question": "What does the author say about thinking and communicating?",
+      "expected_pages": [3]
+    },
+    {
+      "question": "How is writing connected to mental organization?",
+      "expected_pages": [3]
+    },
+    {
+      "question": "How do I deploy Kubernetes on AWS?",
+      "expected_pages": []
+    }
+  ]

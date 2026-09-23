@@ -122,6 +122,15 @@ class Settings(BaseSettings):
         default=0.20,
         validation_alias="SENTINELIQ_RETRIEVAL_MIN_SIMILARITY",
     )
+    jwt_secret_key: str | None = Field(
+        default=None,
+        validation_alias="SENTINELIQ_JWT_SECRET_KEY",
+    )
+
+    jwt_algorithm: str = Field(
+        default="HS256",
+        validation_alias="SENTINELIQ_JWT_ALGORITHM",
+    )
 
     @classmethod
     def settings_customise_sources(
