@@ -8,15 +8,26 @@ from sentineliq.contracts import (
     AuthorizationContext,
     GenerationRequest,
     LLMProvider,
+    QueryVariantOrigin,
 )
 from sentineliq.providers import (
     OpenAIGenerationProvider,
 )
+from sentineliq.querying import (
+    HypotheticalQuery,
+    QueryAnalyzer,
+    QueryExpander,
+    QueryPlanExecutor,
+    QueryPlanner,
+    QueryRewriter,
+    RetrievalBackend,
+)
 from sentineliq.rag.context import (
     ContextAssembler,
 )
-from sentineliq.retrieval.service import (
-    RetrievalService,
+from sentineliq.retrieval.access import (
+    RetrievalAccessScope,
+    scope_from_authorization,
 )
 
 INSUFFICIENT_EVIDENCE_ANSWER = (
@@ -40,20 +51,38 @@ class Citation:
 class RAGAnswer:
     answer: str
     citations: list[Citation]
+    retrieval_query: str
+    rewrite_used: bool = False
+    retrieved_titles: tuple[str, ...] = ()
+    techniques: tuple[str, ...] = ()
 
 
 class RAGService:
     def __init__(
         self,
-        retrieval_service: RetrievalService,
+        retrieval_service: RetrievalBackend,
         generation_provider: LLMProvider | None = None,
         context_assembler: ContextAssembler | None = None,
+        query_planner: QueryPlanner | None = None,
+        query_rewriter: QueryRewriter | None = None,
+        query_expander: QueryExpander | None = None,
+        hyde_generator: HypotheticalQuery | None = None,
     ) -> None:
-        self._retrieval_service = retrieval_service
-
         self._generation_provider = generation_provider or OpenAIGenerationProvider()
 
         self._context_assembler = context_assembler or ContextAssembler()
+
+        self._query_analyzer = QueryAnalyzer()
+
+        self._query_planner = query_planner or QueryPlanner()
+
+        self._query_rewriter = query_rewriter or QueryRewriter(self._generation_provider)
+
+        self._query_expander = query_expander or QueryExpander(self._generation_provider)
+
+        self._hyde_generator = hyde_generator or HypotheticalQuery(self._generation_provider)
+
+        self._query_executor = QueryPlanExecutor(retrieval_service)
 
     def answer(
         self,
@@ -68,17 +97,81 @@ class RAGService:
         if not question:
             raise ValueError("Question cannot be empty")
 
-        results = self._retrieval_service.search(
+        analysis = self._query_analyzer.analyze(question)
+
+        plan = self._query_planner.plan(analysis)
+
+        access_scope = self._access_scope(
+            tenant_id=tenant_id,
+            authorization=authorization,
+        )
+
+        retrieval_query = question
+        rewrite_used = False
+        techniques: list[str] = []
+        variant_queries: tuple[str, ...] = ()
+        executor_query = question
+
+        if plan.rewrite:
+            variant = self._query_rewriter.rewrite(question)
+            retrieval_query = variant.text
+            executor_query = variant.text
+            rewrite_used = variant.origin is QueryVariantOrigin.REWRITE
+
+            if rewrite_used:
+                techniques.append("rewrite")
+
+        if plan.hyde:
+            hypothetical = self._hyde_generator.generate(question)
+
+            if hypothetical is not None:
+                retrieval_query = hypothetical.text
+                variant_queries = (hypothetical.text,)
+                executor_query = question
+                techniques.append("hyde")
+
+        elif plan.multi_query:
+            alternates = self._query_expander.expand(question)
+
+            if alternates:
+                retrieval_query = question
+                variant_queries = (
+                    question,
+                    *[item.text for item in alternates],
+                )
+                executor_query = question
+                techniques.append("multi_query")
+
+                if plan.rag_fusion:
+                    techniques.append("rag_fusion")
+
+        if plan.rerank:
+            techniques.append("rerank")
+
+        if plan.parent_expansion:
+            techniques.append("parent_expansion")
+
+        execution = self._query_executor.execute(
             session=session,
             tenant_id=tenant_id,
-            query=question,
-            limit=limit,
+            query=executor_query,
+            plan=plan,
+            access_scope=access_scope,
+            variant_queries=variant_queries,
         )
+
+        results = execution.results
+
+        retrieved_titles = tuple(result.document_title for result in results)
 
         if not results:
             return RAGAnswer(
                 answer=(INSUFFICIENT_EVIDENCE_ANSWER),
                 citations=[],
+                retrieval_query=retrieval_query,
+                rewrite_used=rewrite_used,
+                retrieved_titles=retrieved_titles,
+                techniques=tuple(techniques),
             )
 
         assembled = self._context_assembler.assemble(results)
@@ -87,6 +180,10 @@ class RAGService:
             return RAGAnswer(
                 answer=(INSUFFICIENT_EVIDENCE_ANSWER),
                 citations=[],
+                retrieval_query=retrieval_query,
+                rewrite_used=rewrite_used,
+                retrieved_titles=retrieved_titles,
+                techniques=tuple(techniques),
             )
 
         generation = self._generation_provider.generate(
@@ -121,6 +218,10 @@ class RAGService:
             return RAGAnswer(
                 answer=(INSUFFICIENT_EVIDENCE_ANSWER),
                 citations=[],
+                retrieval_query=retrieval_query,
+                rewrite_used=rewrite_used,
+                retrieved_titles=retrieved_titles,
+                techniques=tuple(techniques),
             )
 
         used_numbers = self._used_citation_numbers(
@@ -152,7 +253,25 @@ class RAGService:
         return RAGAnswer(
             answer=answer,
             citations=citations,
+            retrieval_query=retrieval_query,
+            rewrite_used=rewrite_used,
+            retrieved_titles=retrieved_titles,
+            techniques=tuple(techniques),
         )
+
+    @staticmethod
+    def _access_scope(
+        *,
+        tenant_id: UUID,
+        authorization: AuthorizationContext | None,
+    ) -> RetrievalAccessScope:
+        if authorization is None:
+            return RetrievalAccessScope(tenant_id=tenant_id)
+
+        if authorization.tenant_id != tenant_id:
+            raise ValueError("Authorization tenant does not match requested tenant")
+
+        return scope_from_authorization(authorization)
 
     @staticmethod
     def _used_citation_numbers(

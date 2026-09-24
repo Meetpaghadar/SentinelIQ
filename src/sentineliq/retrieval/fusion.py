@@ -109,3 +109,65 @@ def reciprocal_rank_fusion(
         )
 
     return results
+
+
+def unique_merge(
+    ranked_lists: list[list[RetrievalResult]],
+    limit: int,
+) -> list[RetrievalResult]:
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+
+    seen: set[UUID] = set()
+    merged: list[RetrievalResult] = []
+
+    for results in ranked_lists:
+        for result in results:
+            if result.chunk_id in seen:
+                continue
+
+            seen.add(result.chunk_id)
+            merged.append(result)
+
+            if len(merged) >= limit:
+                return merged
+
+    return merged
+
+
+def reciprocal_rank_fuse_lists(
+    ranked_lists: list[list[RetrievalResult]],
+    limit: int,
+    rrf_k: int = DEFAULT_RRF_K,
+) -> list[RetrievalResult]:
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be greater than zero")
+
+    scores: dict[UUID, float] = {}
+    first_seen: dict[UUID, RetrievalResult] = {}
+
+    for results in ranked_lists:
+        for rank, result in enumerate(results, start=1):
+            chunk_id = result.chunk_id
+
+            if chunk_id not in first_seen:
+                first_seen[chunk_id] = result
+
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + (1.0 / (rrf_k + rank))
+
+    ranked = sorted(
+        scores.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    return [
+        first_seen[chunk_id].with_updates(
+            fusion_score=score,
+            retrieval_method="rrf",
+        )
+        for chunk_id, score in ranked[:limit]
+    ]
