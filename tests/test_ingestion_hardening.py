@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from sentineliq.ingestion.ocr import needs_ocr
+from sentineliq.ingestion.pdf import ExtractedPage
 from sentineliq.ingestion.retry import (
     RetryExhaustedError,
     retry_call,
@@ -10,6 +12,7 @@ from sentineliq.ingestion.security import (
     IngestionSecurityError,
     scan_ingestion_file,
 )
+from sentineliq.ingestion.tables import _markdown_table
 
 
 def test_rejects_unsupported_extension(
@@ -83,11 +86,6 @@ def test_retry_exhaustion() -> None:
             initial_delay_seconds=0,
         )
     
-from sentineliq.ingestion.ocr import needs_ocr
-from sentineliq.ingestion.pdf import ExtractedPage
-from sentineliq.ingestion.tables import (
-    _markdown_table,
-)
 
 
 def test_detects_pdf_that_needs_ocr() -> None:

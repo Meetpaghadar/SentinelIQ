@@ -1,29 +1,128 @@
-from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from sentineliq.config import get_settings
-from sentineliq.embeddings.service import EmbeddingService
-from sentineliq.models import Chunk, Document, DocumentVersion
+from sentineliq.embeddings.service import (
+    EmbeddingService,
+)
+from sentineliq.retrieval.dense import (
+    DenseRetriever,
+)
+from sentineliq.retrieval.fusion import (
+    reciprocal_rank_fusion,
+)
+from sentineliq.retrieval.models import (
+    RetrievalResult,
+)
+from sentineliq.retrieval.parent_expansion import (
+    ParentExpander,
+)
+from sentineliq.retrieval.reranker import (
+    LLMReranker,
+)
+from sentineliq.retrieval.sparse import (
+    BM25Retriever,
+)
 
-
-@dataclass(frozen=True)
-class RetrievalResult:
-    chunk_id: UUID
-    document_id: UUID
-    document_title: str
-    document_version_id: UUID
-    version_number: int
-    page_number: int | None
-    content: str
-    similarity: float
+DEFAULT_CANDIDATE_K = 40
+DEFAULT_FUSION_K = 20
 
 
 class RetrievalService:
-    def __init__(self, embedding_service: EmbeddingService) -> None:
-        self._embedding_service = embedding_service
+    def __init__(
+        self,
+        embedding_service: EmbeddingService,
+    ) -> None:
+        self._dense_retriever = DenseRetriever(embedding_service)
+
+        self._sparse_retriever = BM25Retriever()
+
+        self._reranker = LLMReranker()
+
+        self._parent_expander = ParentExpander()
+
+    def search_dense(
+        self,
+        session: Session,
+        tenant_id: UUID,
+        query: str,
+        limit: int = 5,
+    ) -> list[RetrievalResult]:
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+
+        candidate_k = max(
+            DEFAULT_CANDIDATE_K,
+            limit,
+        )
+
+        results = self._dense_retriever.search(
+            session,
+            tenant_id=tenant_id,
+            query=query,
+            candidate_k=candidate_k,
+        )
+
+        return results[:limit]
+
+    def search_sparse(
+        self,
+        session: Session,
+        tenant_id: UUID,
+        query: str,
+        limit: int = 5,
+    ) -> list[RetrievalResult]:
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+
+        candidate_k = max(
+            DEFAULT_CANDIDATE_K,
+            limit,
+        )
+
+        results = self._sparse_retriever.search(
+            session,
+            tenant_id=tenant_id,
+            query=query,
+            candidate_k=candidate_k,
+        )
+
+        return results[:limit]
+
+    def search_hybrid(
+        self,
+        session: Session,
+        tenant_id: UUID,
+        query: str,
+        limit: int = 20,
+    ) -> list[RetrievalResult]:
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+
+        candidate_k = max(
+            DEFAULT_CANDIDATE_K,
+            limit * 2,
+        )
+
+        dense_results = self._dense_retriever.search(
+            session,
+            tenant_id=tenant_id,
+            query=query,
+            candidate_k=candidate_k,
+        )
+
+        sparse_results = self._sparse_retriever.search(
+            session,
+            tenant_id=tenant_id,
+            query=query,
+            candidate_k=candidate_k,
+        )
+
+        return reciprocal_rank_fusion(
+            dense_results=dense_results,
+            sparse_results=sparse_results,
+            limit=limit,
+        )
 
     def search(
         self,
@@ -35,58 +134,25 @@ class RetrievalService:
         if limit <= 0:
             raise ValueError("limit must be greater than zero")
 
-        query_embedding = self._embedding_service.embed_query(query)
-        distance = Chunk.embedding.cosine_distance(query_embedding)
-
-        statement = (
-            select(
-                Chunk.id,
-                Document.id.label("document_id"),
-                Document.title,
-                DocumentVersion.id.label("document_version_id"),
-                DocumentVersion.version_number,
-                Chunk.page_number,
-                Chunk.content,
-                distance.label("distance"),
-            )
-            .join(
-                DocumentVersion,
-                Chunk.document_version_id == DocumentVersion.id,
-            )
-            .join(
-                Document,
-                DocumentVersion.document_id == Document.id,
-            )
-            .where(
-                Document.tenant_id == tenant_id,
-                Chunk.embedding.is_not(None),
-            )
-            .order_by(distance)
-            .limit(limit)
+        fused = self.search_hybrid(
+            session=session,
+            tenant_id=tenant_id,
+            query=query,
+            limit=max(
+                DEFAULT_FUSION_K,
+                limit,
+            ),
         )
 
-        rows = session.execute(statement).all()
-        settings = get_settings()
+        reranked_children = self._reranker.rerank(
+            query=query,
+            candidates=fused,
+            limit=limit,
+        )
 
-        results: list[RetrievalResult] = []
+        expanded = self._parent_expander.expand(
+            session,
+            children=reranked_children,
+        )
 
-        for row in rows:
-            similarity = 1.0 - float(row.distance)
-
-            if similarity < settings.retrieval_min_similarity:
-                continue
-
-            results.append(
-                RetrievalResult(
-                    chunk_id=row.id,
-                    document_id=row.document_id,
-                    document_title=row.title,
-                    document_version_id=row.document_version_id,
-                    version_number=row.version_number,
-                    page_number=row.page_number,
-                    content=row.content,
-                    similarity=similarity,
-                )
-            )
-
-        return results
+        return expanded[:limit]
