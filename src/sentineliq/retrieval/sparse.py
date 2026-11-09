@@ -110,12 +110,12 @@ class BM25Retriever:
         tenant_id: UUID,
         query: str,
         candidate_k: int,
-        access_scope: (RetrievalAccessScope | None) = None,
+        access_scope: RetrievalAccessScope,
     ) -> list[RetrievalResult]:
         if candidate_k <= 0:
             raise ValueError("candidate_k must be greater than zero")
 
-        scope = access_scope or RetrievalAccessScope(tenant_id=tenant_id)
+        scope = access_scope
 
         if scope.tenant_id != tenant_id:
             raise ValueError("Retrieval access scope tenant does not match requested tenant")

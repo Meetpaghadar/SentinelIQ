@@ -2,8 +2,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from sentineliq.contracts.retrieval import RetrievalCandidate
-
 
 class EmbeddingProvider(Protocol):
     def embed_documents(
@@ -22,9 +20,8 @@ class RerankerProvider(Protocol):
         self,
         *,
         query: str,
-        candidates: Sequence[RetrievalCandidate],
-        limit: int,
-    ) -> list[RetrievalCandidate]: ...
+        documents: Sequence[str],
+    ) -> list[float]: ...
 
 
 @dataclass(frozen=True, slots=True)

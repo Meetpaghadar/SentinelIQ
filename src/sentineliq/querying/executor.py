@@ -29,7 +29,7 @@ class RetrievalBackend(Protocol):
         tenant_id: UUID,
         query: str,
         limit: int,
-        access_scope: RetrievalAccessScope | None = None,
+        access_scope: RetrievalAccessScope,
         candidate_k: int | None = None,
     ) -> list[RetrievalResult]: ...
 
@@ -40,7 +40,7 @@ class RetrievalBackend(Protocol):
         tenant_id: UUID,
         query: str,
         limit: int,
-        access_scope: RetrievalAccessScope | None = None,
+        access_scope: RetrievalAccessScope,
         candidate_k: int | None = None,
         rerank: bool = True,
         parent_expansion: bool = True,
@@ -77,10 +77,19 @@ class QueryPlanExecutor:
         tenant_id: UUID,
         query: str,
         plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None = None,
+        access_scope: RetrievalAccessScope,
         variant_queries: tuple[str, ...] = (),
     ) -> PlannedRetrievalExecution:
+        if access_scope.tenant_id != tenant_id:
+            raise ValueError("Retrieval access scope tenant does not match requested tenant")
+
         self._validate_plan(plan)
+
+        if RetrievalStrategy.SQL in plan.strategies:
+            raise RetrievalExecutionUnavailable("SQL retrieval is not available")
+
+        if RetrievalStrategy.TEMPORAL in plan.strategies:
+            raise RetrievalExecutionUnavailable("Temporal/version retrieval is not available")
 
         if variant_queries:
             return self._execute_multi(
@@ -90,24 +99,6 @@ class QueryPlanExecutor:
                 plan=plan,
                 access_scope=access_scope,
                 variant_queries=variant_queries,
-            )
-
-        if RetrievalStrategy.SQL in plan.strategies:
-            return self._execute_sql_fallback(
-                session=session,
-                tenant_id=tenant_id,
-                query=query,
-                plan=plan,
-                access_scope=access_scope,
-            )
-
-        if RetrievalStrategy.TEMPORAL in plan.strategies:
-            return self._execute_temporal_fallback(
-                session=session,
-                tenant_id=tenant_id,
-                query=query,
-                plan=plan,
-                access_scope=access_scope,
             )
 
         if RetrievalStrategy.GRAPH in plan.strategies:
@@ -167,7 +158,7 @@ class QueryPlanExecutor:
         tenant_id: UUID,
         query: str,
         plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None,
+        access_scope: RetrievalAccessScope,
     ) -> PlannedRetrievalExecution:
         results = self._retrieval_service.search_hybrid(
             session=session,
@@ -192,7 +183,7 @@ class QueryPlanExecutor:
         tenant_id: UUID,
         query: str,
         plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None,
+        access_scope: RetrievalAccessScope,
     ) -> PlannedRetrievalExecution:
         results = self._retrieval_service.search(
             session=session,
@@ -212,69 +203,6 @@ class QueryPlanExecutor:
             requested_strategies=(plan.strategies),
         )
 
-    def _execute_sql_fallback(
-        self,
-        *,
-        session: Session,
-        tenant_id: UUID,
-        query: str,
-        plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None,
-    ) -> PlannedRetrievalExecution:
-        results = self._retrieval_service.search(
-            session=session,
-            tenant_id=tenant_id,
-            query=query,
-            limit=plan.top_k,
-            access_scope=access_scope,
-            candidate_k=plan.candidate_k,
-            rerank=plan.rerank,
-            parent_expansion=plan.parent_expansion,
-        )
-
-        return PlannedRetrievalExecution(
-            results=results,
-            requested_path=plan.path,
-            executed_path=QueryPath.NORMAL,
-            requested_strategies=(plan.strategies),
-            degraded=True,
-            degradation_reason=(
-                "SQL retrieval is not implemented yet; used the document hybrid retrieval path."
-            ),
-        )
-
-    def _execute_temporal_fallback(
-        self,
-        *,
-        session: Session,
-        tenant_id: UUID,
-        query: str,
-        plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None,
-    ) -> PlannedRetrievalExecution:
-        results = self._retrieval_service.search(
-            session=session,
-            tenant_id=tenant_id,
-            query=query,
-            limit=plan.top_k,
-            access_scope=access_scope,
-            candidate_k=plan.candidate_k,
-            rerank=plan.rerank,
-            parent_expansion=plan.parent_expansion,
-        )
-
-        return PlannedRetrievalExecution(
-            results=results,
-            requested_path=plan.path,
-            executed_path=QueryPath.NORMAL,
-            requested_strategies=(plan.strategies),
-            degraded=True,
-            degradation_reason=(
-                "Temporal/version-aware retrieval is not implemented yet; "
-                "used the document hybrid retrieval path."
-            ),
-        )
-
     def _execute_graph_fallback(
         self,
         *,
@@ -282,7 +210,7 @@ class QueryPlanExecutor:
         tenant_id: UUID,
         query: str,
         plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None,
+        access_scope: RetrievalAccessScope,
     ) -> PlannedRetrievalExecution:
         results = self._retrieval_service.search(
             session=session,
@@ -313,7 +241,7 @@ class QueryPlanExecutor:
         tenant_id: UUID,
         query: str,
         plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None,
+        access_scope: RetrievalAccessScope,
     ) -> PlannedRetrievalExecution:
         results = self._retrieval_service.search(
             session=session,
@@ -342,7 +270,7 @@ class QueryPlanExecutor:
         tenant_id: UUID,
         query: str,
         plan: QueryPlan,
-        access_scope: RetrievalAccessScope | None,
+        access_scope: RetrievalAccessScope,
         variant_queries: tuple[str, ...],
     ) -> PlannedRetrievalExecution:
         search_multi = getattr(

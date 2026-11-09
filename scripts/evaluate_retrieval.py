@@ -3,14 +3,17 @@ import json
 from pathlib import Path
 from uuid import UUID
 
+from sentineliq.auth.dependencies import resolve_authenticated_user
 from sentineliq.db.session import SessionLocal
 from sentineliq.embeddings.service import EmbeddingService
+from sentineliq.retrieval.access import resolve_access_scope
 from sentineliq.retrieval.service import RetrievalService
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate SentinelIQ retrieval.")
     parser.add_argument("--tenant-id", required=True, type=UUID)
+    parser.add_argument("--user-id", required=True, type=UUID)
     parser.add_argument(
         "--eval-file",
         type=Path,
@@ -27,6 +30,18 @@ def main() -> None:
     passed = 0
 
     with SessionLocal() as session:
+        authenticated_user = resolve_authenticated_user(
+            session,
+            user_id=args.user_id,
+            tenant_id=args.tenant_id,
+        )
+        if "knowledge:query" not in authenticated_user.permissions:
+            raise PermissionError("knowledge:query permission is required")
+        access_scope = resolve_access_scope(
+            session,
+            authenticated_user.authorization_context(),
+        )
+
         for index, case in enumerate(cases, start=1):
             question = case["question"]
             expected_pages = set(case["expected_pages"])
@@ -35,6 +50,7 @@ def main() -> None:
                 session=session,
                 tenant_id=args.tenant_id,
                 query=question,
+                access_scope=access_scope,
                 limit=args.limit,
             )
 

@@ -12,9 +12,6 @@ from sentineliq.auth.dependencies import (
 from sentineliq.auth.permissions import (
     require_permission,
 )
-from sentineliq.contracts import (
-    AuthorizationContext,
-)
 from sentineliq.db.session import get_db
 from sentineliq.embeddings.service import (
     EmbeddingService,
@@ -41,10 +38,7 @@ def query_knowledge(
     current_user: AuthenticatedUser = Depends(require_permission("knowledge:query")),
     session: Session = Depends(get_db),
 ) -> QueryResponse:
-    authorization = AuthorizationContext(
-        tenant_id=current_user.tenant_id,
-        user_id=current_user.user_id,
-    )
+    authorization = current_user.authorization_context()
 
     embedding_service = EmbeddingService()
 
@@ -56,6 +50,7 @@ def query_knowledge(
         session=session,
         tenant_id=authorization.tenant_id,
         question=request.question,
+        limit=request.limit,
         authorization=authorization,
     )
 
@@ -74,4 +69,6 @@ def query_knowledge(
             )
             for citation in result.citations
         ],
+        degraded=result.degraded,
+        degradation_reason=result.degradation_reason,
     )

@@ -1,15 +1,17 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from sentineliq.models import (
     Chunk,
     Document,
     DocumentVersion,
+    KnowledgeStatus,
     ParentChunk,
 )
+from sentineliq.retrieval.access import RetrievalAccessScope, build_access_predicates
 from sentineliq.retrieval.models import (
     RetrievalResult,
 )
@@ -21,6 +23,7 @@ class ParentExpander:
         session: Session,
         *,
         children: list[RetrievalResult],
+        access_scope: RetrievalAccessScope,
     ) -> list[RetrievalResult]:
         if not children:
             return []
@@ -40,7 +43,8 @@ class ParentExpander:
             )
             .join(
                 ParentChunk,
-                Chunk.parent_chunk_id == ParentChunk.id,
+                (Chunk.parent_chunk_id == ParentChunk.id)
+                & (ParentChunk.document_version_id == Chunk.document_version_id),
             )
             .join(
                 DocumentVersion,
@@ -50,7 +54,19 @@ class ParentExpander:
                 Document,
                 DocumentVersion.document_id == Document.id,
             )
-            .where(Chunk.id.in_(child_ids))
+            .where(
+                Chunk.id.in_(child_ids),
+                *build_access_predicates(access_scope),
+                DocumentVersion.status == KnowledgeStatus.ACTIVE.value,
+                or_(
+                    DocumentVersion.effective_from.is_(None),
+                    DocumentVersion.effective_from <= func.now(),
+                ),
+                or_(
+                    DocumentVersion.effective_until.is_(None),
+                    DocumentVersion.effective_until > func.now(),
+                ),
+            )
         )
 
         rows = session.execute(statement).mappings().all()
@@ -84,7 +100,7 @@ class ParentExpander:
 
             expanded.append(
                 RetrievalResult(
-                    chunk_id=(child.chunk_id),
+                    chunk_id=parent_id,
                     document_id=(row["document_id"]),
                     document_title=(row["document_title"]),
                     document_version_id=(row["document_version_id"]),
@@ -98,6 +114,7 @@ class ParentExpander:
                     dense_rank=(child.dense_rank),
                     sparse_rank=(child.sparse_rank),
                     retrieval_method=(f"{child.retrieval_method}+parent"),
+                    child_chunk_id=child.chunk_id,
                 )
             )
 

@@ -10,6 +10,8 @@ ENV SENTINELIQ_PORT=8000
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY config ./config
+COPY migrations ./migrations
+COPY alembic.ini ./
 
 RUN pip install --no-cache-dir .
 

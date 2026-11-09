@@ -2,6 +2,7 @@ from typing import cast
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.orm import Session
 
 from sentineliq.contracts.query import (
@@ -12,6 +13,7 @@ from sentineliq.contracts.query import (
 from sentineliq.querying import (
     QueryPlanExecutor,
 )
+from sentineliq.querying.executor import RetrievalExecutionUnavailable
 from sentineliq.retrieval.access import (
     RetrievalAccessScope,
 )
@@ -96,11 +98,13 @@ def test_fast_path_uses_hybrid_without_full_pipeline() -> None:
         parent_expansion=False,
     )
 
+    access_scope = RetrievalAccessScope(tenant_id=uuid4())
     execution = executor.execute(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=access_scope.tenant_id,
         query="What is MFA?",
         plan=plan,
+        access_scope=access_scope,
     )
 
     assert retrieval.hybrid_calls == 1
@@ -127,11 +131,13 @@ def test_fast_path_with_parent_expansion_uses_configured_search() -> None:
         parent_expansion=True,
     )
 
+    access_scope = RetrievalAccessScope(tenant_id=uuid4())
     execution = executor.execute(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=access_scope.tenant_id,
         query="What is MFA?",
         plan=plan,
+        access_scope=access_scope,
     )
 
     assert retrieval.hybrid_calls == 0
@@ -153,11 +159,13 @@ def test_normal_path_preserves_full_pipeline() -> None:
         parent_expansion=True,
     )
 
+    access_scope = RetrievalAccessScope(tenant_id=uuid4())
     execution = executor.execute(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=access_scope.tenant_id,
         query="Explain the MFA policy.",
         plan=plan,
+        access_scope=access_scope,
     )
 
     assert retrieval.hybrid_calls == 0
@@ -199,6 +207,31 @@ def test_executor_forwards_access_scope() -> None:
     assert retrieval.last_access_scope is access_scope
 
 
+def test_executor_rejects_cross_tenant_access_scope() -> None:
+    retrieval = FakeRetrievalService()
+    executor = QueryPlanExecutor(retrieval)
+    plan = QueryPlan(
+        path=QueryPath.FAST,
+        strategies=(RetrievalStrategy.HYBRID,),
+        top_k=5,
+        candidate_k=20,
+        rerank=False,
+        parent_expansion=False,
+    )
+
+    with pytest.raises(ValueError, match="tenant"):
+        executor.execute(
+            session=_session(),
+            tenant_id=uuid4(),
+            query="What is MFA?",
+            plan=plan,
+            access_scope=RetrievalAccessScope(tenant_id=uuid4()),
+        )
+
+    assert retrieval.hybrid_calls == 0
+    assert retrieval.full_calls == 0
+
+
 def test_deep_path_currently_uses_full_pipeline() -> None:
     retrieval = FakeRetrievalService()
 
@@ -213,11 +246,13 @@ def test_deep_path_currently_uses_full_pipeline() -> None:
         parent_expansion=True,
     )
 
+    access_scope = RetrievalAccessScope(tenant_id=uuid4())
     execution = executor.execute(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=access_scope.tenant_id,
         query="Investigate MFA controls.",
         plan=plan,
+        access_scope=access_scope,
     )
 
     assert retrieval.full_calls == 1
@@ -242,11 +277,13 @@ def test_graph_strategy_degrades_to_document_retrieval() -> None:
         parent_expansion=True,
     )
 
+    access_scope = RetrievalAccessScope(tenant_id=uuid4())
     execution = executor.execute(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=access_scope.tenant_id,
         query=("Which systems are affected by this policy?"),
         plan=plan,
+        access_scope=access_scope,
     )
 
     assert retrieval.full_calls == 1
@@ -275,17 +312,17 @@ def test_sql_strategy_degrades_to_document_retrieval() -> None:
         parent_expansion=True,
     )
 
-    execution = executor.execute(
-        session=_session(),
-        tenant_id=uuid4(),
-        query=("How many findings are overdue?"),
-        plan=plan,
-    )
+    access_scope = RetrievalAccessScope(tenant_id=uuid4())
+    with pytest.raises(RetrievalExecutionUnavailable, match="SQL retrieval"):
+        executor.execute(
+            session=_session(),
+            tenant_id=access_scope.tenant_id,
+            query=("How many findings are overdue?"),
+            plan=plan,
+            access_scope=access_scope,
+        )
 
-    assert retrieval.full_calls == 1
-    assert execution.degraded is True
-    assert execution.executed_path is QueryPath.NORMAL
-    assert execution.degradation_reason is not None
+    assert retrieval.full_calls == 0
 
 
 def test_temporal_strategy_degrades_to_document_retrieval() -> None:
@@ -305,14 +342,14 @@ def test_temporal_strategy_degrades_to_document_retrieval() -> None:
         parent_expansion=True,
     )
 
-    execution = executor.execute(
-        session=_session(),
-        tenant_id=uuid4(),
-        query=("What was the policy in 2025?"),
-        plan=plan,
-    )
+    access_scope = RetrievalAccessScope(tenant_id=uuid4())
+    with pytest.raises(RetrievalExecutionUnavailable, match="Temporal/version"):
+        executor.execute(
+            session=_session(),
+            tenant_id=access_scope.tenant_id,
+            query=("What was the policy in 2025?"),
+            plan=plan,
+            access_scope=access_scope,
+        )
 
-    assert retrieval.full_calls == 1
-    assert execution.degraded is True
-    assert execution.executed_path is QueryPath.NORMAL
-    assert execution.degradation_reason is not None
+    assert retrieval.full_calls == 0

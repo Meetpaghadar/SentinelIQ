@@ -116,6 +116,7 @@ def test_rewritten_retrieval_keeps_authorization_scope() -> None:
     authorization = AuthorizationContext(
         tenant_id=tenant_id,
         user_id=uuid4(),
+        permissions=frozenset({"knowledge:query"}),
     )
 
     service.answer(
@@ -142,19 +143,23 @@ def test_generation_receives_original_question() -> None:
 
     original = "What is MFA?"
 
+    tenant_id = uuid4()
     result = service.answer(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=tenant_id,
         question=original,
+        authorization=AuthorizationContext(
+            tenant_id=tenant_id,
+            user_id=uuid4(),
+            permissions=frozenset({"knowledge:query"}),
+        ),
     )
 
     assert result.rewrite_used is True
     assert result.retrieval_query == "What is multi-factor authentication?"
 
     generation_requests = [
-        request
-        for request in generator.requests
-        if request.instructions != REWRITE_INSTRUCTIONS
+        request for request in generator.requests if request.instructions != REWRITE_INSTRUCTIONS
     ]
 
     assert generation_requests

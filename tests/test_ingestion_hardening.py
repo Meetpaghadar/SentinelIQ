@@ -85,7 +85,6 @@ def test_retry_exhaustion() -> None:
             attempts=2,
             initial_delay_seconds=0,
         )
-    
 
 
 def test_detects_pdf_that_needs_ocr() -> None:
@@ -107,10 +106,7 @@ def test_text_pdf_does_not_need_ocr() -> None:
     pages = [
         ExtractedPage(
             page_number=1,
-            text=(
-                "This PDF already contains "
-                "extractable document text."
-            ),
+            text=("This PDF already contains extractable document text."),
         )
     ]
 
@@ -137,7 +133,4 @@ def test_table_is_preserved_as_markdown() -> None:
 
     assert "| Control | Status |" in table
     assert "| MFA | Required |" in table
-    assert (
-        "| Encryption | Enabled |"
-        in table
-    )
+    assert "| Encryption | Enabled |" in table

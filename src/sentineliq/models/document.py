@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime, timezone
-from enum import Enum
 from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from sentineliq.contracts.knowledge import DataClassification, KnowledgeStatus
 from sentineliq.db.base import Base
 
 if TYPE_CHECKING:
@@ -15,22 +15,6 @@ if TYPE_CHECKING:
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-class KnowledgeStatus(str, Enum):
-    DRAFT = "draft"
-    ACTIVE = "active"
-    SUPERSEDED = "superseded"
-    EXPIRED = "expired"
-    REVOKED = "revoked"
-    ARCHIVED = "archived"
-
-
-class DataClassification(str, Enum):
-    PUBLIC = "public"
-    INTERNAL = "internal"
-    CONFIDENTIAL = "confidential"
-    HIGHLY_CONFIDENTIAL = "highly_confidential"
 
 
 class KnowledgeSource(Base):

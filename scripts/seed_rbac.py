@@ -11,7 +11,10 @@ from sentineliq.models import (
 
 ADMIN_EMAIL = "admin@sentineliq.local"
 ROLE_NAME = "admin"
-PERMISSION_CODE = "knowledge:query"
+PERMISSION_CODES = {
+    "knowledge:query": "Query authorized knowledge",
+    "knowledge:classification:internal": "Read internal knowledge",
+}
 
 
 def main() -> None:
@@ -21,15 +24,14 @@ def main() -> None:
         if user is None:
             raise ValueError(f"User not found: {ADMIN_EMAIL}")
 
-        permission = session.scalar(select(Permission).where(Permission.code == PERMISSION_CODE))
-
-        if permission is None:
-            permission = Permission(
-                code=PERMISSION_CODE,
-                description="Query authorized knowledge",
-            )
-            session.add(permission)
-            session.flush()
+        permissions: list[Permission] = []
+        for code, description in PERMISSION_CODES.items():
+            permission = session.scalar(select(Permission).where(Permission.code == code))
+            if permission is None:
+                permission = Permission(code=code, description=description)
+                session.add(permission)
+                session.flush()
+            permissions.append(permission)
 
         role = session.scalar(
             select(Role).where(
@@ -64,26 +66,26 @@ def main() -> None:
                 )
             )
 
-        role_permission = session.scalar(
-            select(RolePermission).where(
-                RolePermission.role_id == role.id,
-                RolePermission.permission_id == permission.id,
-            )
-        )
-
-        if role_permission is None:
-            session.add(
-                RolePermission(
-                    role_id=role.id,
-                    permission_id=permission.id,
+        for permission in permissions:
+            role_permission = session.scalar(
+                select(RolePermission).where(
+                    RolePermission.role_id == role.id,
+                    RolePermission.permission_id == permission.id,
                 )
             )
+            if role_permission is None:
+                session.add(
+                    RolePermission(
+                        role_id=role.id,
+                        permission_id=permission.id,
+                    )
+                )
 
         session.commit()
 
         print(f"User: {user.email}")
         print(f"Role: {role.name}")
-        print(f"Permission: {permission.code}")
+        print(f"Permissions: {', '.join(sorted(PERMISSION_CODES))}")
         print("RBAC seeded successfully.")
 
 

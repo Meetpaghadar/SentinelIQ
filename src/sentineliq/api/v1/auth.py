@@ -6,7 +6,7 @@ from sentineliq.api.v1.schemas import LoginRequest, TokenResponse
 from sentineliq.auth.passwords import verify_password
 from sentineliq.auth.tokens import create_access_token
 from sentineliq.db.session import get_db
-from sentineliq.models import User
+from sentineliq.models import Tenant, User
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -17,9 +17,12 @@ def login(
     session: Session = Depends(get_db),
 ) -> TokenResponse:
     user = session.scalar(
-        select(User).where(
+        select(User)
+        .join(Tenant, User.tenant_id == Tenant.id)
+        .where(
             User.email == request.email,
             User.is_active.is_(True),
+            Tenant.slug == request.tenant,
         )
     )
 

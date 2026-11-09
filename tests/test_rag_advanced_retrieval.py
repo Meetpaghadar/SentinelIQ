@@ -127,6 +127,7 @@ def test_multi_query_forwards_authorization_scope() -> None:
         authorization=AuthorizationContext(
             tenant_id=tenant_id,
             user_id=uuid4(),
+            permissions=frozenset({"knowledge:query"}),
         ),
     )
 
@@ -149,10 +150,16 @@ def test_multi_query_fallback_uses_original_query() -> None:
         query_expander=QueryExpander(EmptyGenerator()),
     )
 
+    tenant_id = uuid4()
     service.answer(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=tenant_id,
         question="What is MFA?",
+        authorization=AuthorizationContext(
+            tenant_id=tenant_id,
+            user_id=uuid4(),
+            permissions=frozenset({"knowledge:query"}),
+        ),
     )
 
     assert retrieval.queries == ["What is MFA?"]
@@ -171,10 +178,16 @@ def test_hyde_text_is_not_used_as_evidence_or_citation() -> None:
 
     original = "What is MFA?"
 
+    tenant_id = uuid4()
     result = service.answer(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=tenant_id,
         question=original,
+        authorization=AuthorizationContext(
+            tenant_id=tenant_id,
+            user_id=uuid4(),
+            permissions=frozenset({"knowledge:query"}),
+        ),
     )
 
     assert result.retrieval_query == hyde_text

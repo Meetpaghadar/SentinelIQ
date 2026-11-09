@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -27,12 +27,37 @@ from sentineliq.rag.context import (
 )
 from sentineliq.retrieval.access import (
     RetrievalAccessScope,
-    scope_from_authorization,
+    resolve_access_scope,
 )
 
 INSUFFICIENT_EVIDENCE_ANSWER = (
     "The available sources do not provide enough information to answer this question."
 )
+
+
+def is_insufficient_evidence_answer(answer: str) -> bool:
+    normalized = " ".join(answer.split()).casefold()
+    expected = " ".join(INSUFFICIENT_EVIDENCE_ANSWER.split()).casefold()
+
+    if normalized == expected:
+        return True
+
+    refusal_markers = (
+        "do not provide enough information",
+        "does not provide enough information",
+        "not enough information to answer",
+        "insufficient information to answer",
+        "insufficient evidence",
+        "cannot answer based on the available sources",
+        "cannot answer from the available sources",
+        "sources do not contain enough information",
+        "sources don't contain enough information",
+        "excerpts do not contain enough information",
+        "excerpts don't contain enough information",
+        "evidence does not contain enough information",
+    )
+
+    return any(marker in normalized for marker in refusal_markers)
 
 
 @dataclass(frozen=True)
@@ -55,6 +80,8 @@ class RAGAnswer:
     rewrite_used: bool = False
     retrieved_titles: tuple[str, ...] = ()
     techniques: tuple[str, ...] = ()
+    degraded: bool = False
+    degradation_reason: str | None = None
 
 
 class RAGService:
@@ -89,19 +116,32 @@ class RAGService:
         session: Session,
         tenant_id: UUID,
         question: str,
+        authorization: AuthorizationContext,
         limit: int = 5,
-        authorization: (AuthorizationContext | None) = None,
     ) -> RAGAnswer:
         question = question.strip()
 
         if not question:
             raise ValueError("Question cannot be empty")
 
+        if authorization.tenant_id != tenant_id:
+            raise ValueError("Authorization tenant does not match requested tenant")
+        if not authorization.has_permission("knowledge:query"):
+            raise PermissionError("knowledge:query permission is required")
+        if limit <= 0 or limit > 20:
+            raise ValueError("limit must be between 1 and 20")
+
         analysis = self._query_analyzer.analyze(question)
 
         plan = self._query_planner.plan(analysis)
+        plan = replace(
+            plan,
+            top_k=limit,
+            candidate_k=max(plan.candidate_k, limit * 2),
+        )
 
         access_scope = self._access_scope(
+            session=session,
             tenant_id=tenant_id,
             authorization=authorization,
         )
@@ -172,6 +212,8 @@ class RAGService:
                 rewrite_used=rewrite_used,
                 retrieved_titles=retrieved_titles,
                 techniques=tuple(techniques),
+                degraded=execution.degraded,
+                degradation_reason=execution.degradation_reason,
             )
 
         assembled = self._context_assembler.assemble(results)
@@ -184,6 +226,8 @@ class RAGService:
                 rewrite_used=rewrite_used,
                 retrieved_titles=retrieved_titles,
                 techniques=tuple(techniques),
+                degraded=execution.degraded,
+                degradation_reason=execution.degradation_reason,
             )
 
         generation = self._generation_provider.generate(
@@ -214,7 +258,7 @@ class RAGService:
 
         answer = generation.text.strip()
 
-        if self._is_insufficient_evidence_answer(answer):
+        if is_insufficient_evidence_answer(answer):
             return RAGAnswer(
                 answer=(INSUFFICIENT_EVIDENCE_ANSWER),
                 citations=[],
@@ -222,6 +266,8 @@ class RAGService:
                 rewrite_used=rewrite_used,
                 retrieved_titles=retrieved_titles,
                 techniques=tuple(techniques),
+                degraded=execution.degraded,
+                degradation_reason=execution.degradation_reason,
             )
 
         used_numbers = self._used_citation_numbers(
@@ -257,21 +303,21 @@ class RAGService:
             rewrite_used=rewrite_used,
             retrieved_titles=retrieved_titles,
             techniques=tuple(techniques),
+            degraded=execution.degraded,
+            degradation_reason=execution.degradation_reason,
         )
 
     @staticmethod
     def _access_scope(
         *,
+        session: Session,
         tenant_id: UUID,
-        authorization: AuthorizationContext | None,
+        authorization: AuthorizationContext,
     ) -> RetrievalAccessScope:
-        if authorization is None:
-            return RetrievalAccessScope(tenant_id=tenant_id)
-
         if authorization.tenant_id != tenant_id:
             raise ValueError("Authorization tenant does not match requested tenant")
 
-        return scope_from_authorization(authorization)
+        return resolve_access_scope(session, authorization)
 
     @staticmethod
     def _used_citation_numbers(
@@ -299,31 +345,3 @@ class RAGService:
             return cleaned
 
         return cleaned[:maximum_length].rstrip() + "..."
-
-    @staticmethod
-    def _is_insufficient_evidence_answer(
-        answer: str,
-    ) -> bool:
-        normalized = " ".join(answer.split()).casefold()
-
-        expected = " ".join(INSUFFICIENT_EVIDENCE_ANSWER.split()).casefold()
-
-        if normalized == expected:
-            return True
-
-        refusal_markers = (
-            "do not provide enough information",
-            "does not provide enough information",
-            "not enough information to answer",
-            "insufficient information to answer",
-            "insufficient evidence",
-            ("cannot answer based on the available sources"),
-            ("cannot answer from the available sources"),
-            ("sources do not contain enough information"),
-            ("sources don't contain enough information"),
-            ("excerpts do not contain enough information"),
-            ("excerpts don't contain enough information"),
-            ("evidence does not contain enough information"),
-        )
-
-        return any(marker in normalized for marker in refusal_markers)

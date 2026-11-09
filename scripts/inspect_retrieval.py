@@ -1,8 +1,10 @@
 import argparse
 from uuid import UUID
 
+from sentineliq.auth.dependencies import resolve_authenticated_user
 from sentineliq.db.session import SessionLocal
 from sentineliq.embeddings.service import EmbeddingService
+from sentineliq.retrieval.access import resolve_access_scope
 from sentineliq.retrieval.service import RetrievalService
 
 
@@ -10,6 +12,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Inspect SentinelIQ retrieval results.")
     parser.add_argument("question")
     parser.add_argument("--tenant-id", required=True, type=UUID)
+    parser.add_argument("--user-id", required=True, type=UUID)
     parser.add_argument("--limit", type=int, default=5)
 
     args = parser.parse_args()
@@ -18,10 +21,22 @@ def main() -> None:
     retrieval_service = RetrievalService(embedding_service)
 
     with SessionLocal() as session:
+        authenticated_user = resolve_authenticated_user(
+            session,
+            user_id=args.user_id,
+            tenant_id=args.tenant_id,
+        )
+        if "knowledge:query" not in authenticated_user.permissions:
+            raise PermissionError("knowledge:query permission is required")
+
         results = retrieval_service.search(
             session=session,
             tenant_id=args.tenant_id,
             query=args.question,
+            access_scope=resolve_access_scope(
+                session,
+                authenticated_user.authorization_context(),
+            ),
             limit=args.limit,
         )
 

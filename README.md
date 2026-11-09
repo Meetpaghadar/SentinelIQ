@@ -1,8 +1,7 @@
 # SentinelIQ
 
-Enterprise knowledge intelligence platform. Current milestone: **M0 — Engineering Foundation**.
-
-M0 is a runnable API process with health/readiness checks, typed settings, structured logging, and quality gates. It does not implement identity, knowledge retrieval, or RAG.
+Enterprise knowledge intelligence platform with an authorization-aware knowledge registry and
+baseline hybrid RAG foundation. Advanced retrieval experiments remain disabled by default.
 
 ## Layout
 
@@ -52,7 +51,30 @@ Readiness means the process loaded configuration. Postgres and Redis are not par
 ## Docker
 
 ```powershell
-docker compose up --build
+copy .env.example .env
+docker compose up -d --build
+docker compose ps
+Invoke-RestMethod http://localhost:8000/health
+Invoke-RestMethod http://localhost:8000/ready
 ```
 
-Only the API container is defined. Configuration is `SENTINELIQ_*` environment variables, which override `config/settings.toml` and `.env`.
+Compose starts the API and PostgreSQL/pgvector. The API waits for PostgreSQL and runs
+`alembic upgrade head` before serving. Configuration is supplied by `SENTINELIQ_*` variables;
+replace the example JWT secret before use. An OpenAI key is required only for embedding,
+reranking, and generation calls.
+
+## Retrieval authorization
+
+The query API requires `knowledge:query`. Retrieval applies tenant, active-version,
+effective-date, classification, document allowlist, and document access-policy constraints
+before loading chunk content. The current access-policy format is a JSON object with optional
+`roles` (any match), `permissions` (all required), and `attributes` (all exact string matches).
+Malformed or unsupported policies fail closed. User attributes are currently empty because the
+identity schema does not yet persist attributes.
+
+For a fresh, non-destructive migration check, use a separate Compose project and volume:
+
+```powershell
+docker compose -p sentineliq-migration-check up -d --build
+docker compose -p sentineliq-migration-check down -v
+```

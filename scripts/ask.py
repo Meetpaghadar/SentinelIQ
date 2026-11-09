@@ -1,6 +1,7 @@
 import argparse
 from uuid import UUID
 
+from sentineliq.auth.dependencies import resolve_authenticated_user
 from sentineliq.db.session import SessionLocal
 from sentineliq.embeddings.service import EmbeddingService
 from sentineliq.rag.service import RAGService
@@ -11,6 +12,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("question")
     parser.add_argument("--tenant-id", required=True)
+    parser.add_argument("--user-id", required=True)
     parser.add_argument("--limit", type=int, default=5)
 
     args = parser.parse_args()
@@ -20,10 +22,19 @@ def main() -> None:
     rag_service = RAGService(retrieval_service)
 
     with SessionLocal() as session:
+        authenticated_user = resolve_authenticated_user(
+            session,
+            user_id=UUID(args.user_id),
+            tenant_id=UUID(args.tenant_id),
+        )
+        if "knowledge:query" not in authenticated_user.permissions:
+            raise PermissionError("knowledge:query permission is required")
+
         result = rag_service.answer(
             session=session,
-            tenant_id=UUID(args.tenant_id),
+            tenant_id=authenticated_user.tenant_id,
             question=args.question,
+            authorization=authenticated_user.authorization_context(),
             limit=args.limit,
         )
 

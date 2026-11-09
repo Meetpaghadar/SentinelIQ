@@ -2,6 +2,7 @@ from typing import cast
 from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.orm import Session
 
 from sentineliq.contracts import (
@@ -28,6 +29,7 @@ class RecordingRetrievalService:
         self.hybrid_calls = 0
         self.full_calls = 0
         self.last_access_scope = None
+        self.last_limit = None
 
     def search_hybrid(
         self,
@@ -39,10 +41,11 @@ class RecordingRetrievalService:
         access_scope=None,
         candidate_k=None,
     ):
-        del session, tenant_id, query, limit, candidate_k
+        del session, tenant_id, query, candidate_k
 
         self.hybrid_calls += 1
         self.last_access_scope = access_scope
+        self.last_limit = limit
 
         return []
 
@@ -58,10 +61,11 @@ class RecordingRetrievalService:
         rerank=True,
         parent_expansion=True,
     ):
-        del session, tenant_id, query, limit, candidate_k, rerank, parent_expansion
+        del session, tenant_id, query, candidate_k, rerank, parent_expansion
 
         self.full_calls += 1
         self.last_access_scope = access_scope
+        self.last_limit = limit
 
         return [
             RetrievalResult(
@@ -93,6 +97,14 @@ def _session() -> Session:
     return cast(Session, MagicMock())
 
 
+def _authorization(tenant_id):
+    return AuthorizationContext(
+        tenant_id=tenant_id,
+        user_id=uuid4(),
+        permissions=frozenset({"knowledge:query"}),
+    )
+
+
 def test_rag_factual_simple_question_uses_full_retrieval_path() -> None:
     retrieval = RecordingRetrievalService()
 
@@ -109,10 +121,12 @@ def test_rag_factual_simple_question_uses_full_retrieval_path() -> None:
     assert plan.rerank is True
     assert plan.parent_expansion is True
 
+    tenant_id = uuid4()
     result = service.answer(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=tenant_id,
         question="What is MFA?",
+        authorization=_authorization(tenant_id),
     )
 
     assert retrieval.hybrid_calls == 0
@@ -136,10 +150,12 @@ def test_rag_conversational_question_uses_fast_hybrid_path() -> None:
     assert plan.rerank is False
     assert plan.parent_expansion is False
 
+    tenant_id = uuid4()
     service.answer(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=tenant_id,
         question="Thanks for the help",
+        authorization=_authorization(tenant_id),
     )
 
     assert retrieval.hybrid_calls == 1
@@ -167,10 +183,12 @@ def test_rag_normal_question_uses_full_retrieval_path() -> None:
     assert plan.rerank is True
     assert plan.parent_expansion is True
 
+    tenant_id = uuid4()
     result = service.answer(
         session=_session(),
-        tenant_id=uuid4(),
+        tenant_id=tenant_id,
         question=question,
+        authorization=_authorization(tenant_id),
     )
 
     assert retrieval.hybrid_calls == 0
@@ -192,6 +210,7 @@ def test_rag_passes_authorization_scope_to_retrieval() -> None:
     authorization = AuthorizationContext(
         tenant_id=tenant_id,
         user_id=uuid4(),
+        permissions=frozenset({"knowledge:query"}),
     )
 
     service.answer(
@@ -203,3 +222,47 @@ def test_rag_passes_authorization_scope_to_retrieval() -> None:
 
     assert retrieval.last_access_scope is not None
     assert retrieval.last_access_scope.tenant_id == tenant_id
+
+
+def test_rag_requires_query_permission() -> None:
+    retrieval = RecordingRetrievalService()
+    service = RAGService(
+        retrieval,
+        generation_provider=FakeGenerator(),
+        query_planner=QueryPlanner(),
+    )
+    tenant_id = uuid4()
+
+    with pytest.raises(PermissionError, match="knowledge:query"):
+        service.answer(
+            session=_session(),
+            tenant_id=tenant_id,
+            question="What is MFA?",
+            authorization=AuthorizationContext(
+                tenant_id=tenant_id,
+                user_id=uuid4(),
+            ),
+        )
+
+    assert retrieval.full_calls == 0
+    assert retrieval.hybrid_calls == 0
+
+
+def test_rag_propagates_requested_limit() -> None:
+    retrieval = RecordingRetrievalService()
+    service = RAGService(
+        retrieval,
+        generation_provider=FakeGenerator(),
+        query_planner=QueryPlanner(),
+    )
+    tenant_id = uuid4()
+
+    service.answer(
+        session=_session(),
+        tenant_id=tenant_id,
+        question="What is MFA?",
+        authorization=_authorization(tenant_id),
+        limit=11,
+    )
+
+    assert retrieval.last_limit == 11

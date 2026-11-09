@@ -44,15 +44,9 @@ def test_all_results_are_preserved() -> None:
 
     assert len(context.items) == 2
 
-    assert (
-        context.items[0].result.document_title
-        == "Policy A"
-    )
+    assert context.items[0].result.document_title == "Policy A"
 
-    assert (
-        context.items[1].result.document_title
-        == "Policy B"
-    )
+    assert context.items[1].result.document_title == "Policy B"
 
 
 def test_context_numbers_are_stable() -> None:

@@ -1,16 +1,37 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SENTINELIQ_DATABASE_URL: postgresql+psycopg://sentineliq:${POSTGRES_PASSWORD:-sentineliq_dev}@postgres:5432/${POSTGRES_DB:-sentineliq}
+      SENTINELIQ_JWT_SECRET_KEY: ${SENTINELIQ_JWT_SECRET_KEY:-local-development-change-me}
+      SENTINELIQ_OPENAI_API_KEY: ${SENTINELIQ_OPENAI_API_KEY:-}
+    command: ["sh", "-c", "alembic upgrade head && sentineliq serve"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
   postgres:
     image: pgvector/pgvector:pg18-trixie
     container_name: sentineliq-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: sentineliq
+      POSTGRES_DB: ${POSTGRES_DB:-sentineliq}
       POSTGRES_USER: sentineliq
-      POSTGRES_PASSWORD: sentineliq_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentineliq_dev}
     ports:
       - "5433:5432"
     volumes:
       - sentineliq_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentineliq -d ${POSTGRES_DB:-sentineliq}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   sentineliq_postgres_data:

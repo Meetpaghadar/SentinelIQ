@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -31,6 +32,7 @@ from sentineliq.retrieval.sparse import (
 
 DEFAULT_CANDIDATE_K = 40
 DEFAULT_FUSION_K = 20
+logger = logging.getLogger(__name__)
 
 
 class RetrievalService:
@@ -51,6 +53,7 @@ class RetrievalService:
         session: Session,
         tenant_id: UUID,
         query: str,
+        access_scope: RetrievalAccessScope,
         limit: int = 5,
     ) -> list[RetrievalResult]:
         if limit <= 0:
@@ -66,6 +69,7 @@ class RetrievalService:
             tenant_id=tenant_id,
             query=query,
             candidate_k=candidate_k,
+            access_scope=access_scope,
         )
 
         return results[:limit]
@@ -75,6 +79,7 @@ class RetrievalService:
         session: Session,
         tenant_id: UUID,
         query: str,
+        access_scope: RetrievalAccessScope,
         limit: int = 5,
     ) -> list[RetrievalResult]:
         if limit <= 0:
@@ -90,6 +95,7 @@ class RetrievalService:
             tenant_id=tenant_id,
             query=query,
             candidate_k=candidate_k,
+            access_scope=access_scope,
         )
 
         return results[:limit]
@@ -99,8 +105,8 @@ class RetrievalService:
         session: Session,
         tenant_id: UUID,
         query: str,
+        access_scope: RetrievalAccessScope,
         limit: int = 20,
-        access_scope: RetrievalAccessScope | None = None,
         candidate_k: int | None = None,
     ) -> list[RetrievalResult]:
         if limit <= 0:
@@ -138,8 +144,8 @@ class RetrievalService:
         session: Session,
         tenant_id: UUID,
         query: str,
+        access_scope: RetrievalAccessScope,
         limit: int = 5,
-        access_scope: RetrievalAccessScope | None = None,
         candidate_k: int | None = None,
         rerank: bool = True,
         parent_expansion: bool = True,
@@ -161,11 +167,18 @@ class RetrievalService:
         children = fused[:limit]
 
         if rerank:
-            children = self._reranker.rerank(
-                query=query,
-                candidates=fused,
-                limit=limit,
-            )
+            try:
+                children = self._reranker.rerank(
+                    query=query,
+                    candidates=fused,
+                    limit=limit,
+                )
+            except (RuntimeError, ValueError, TypeError):
+                logger.exception(
+                    "reranker_failed_using_hybrid_order",
+                    extra={"candidate_count": len(fused), "limit": limit},
+                )
+                children = fused[:limit]
 
         if not parent_expansion:
             return children[:limit]
@@ -173,6 +186,7 @@ class RetrievalService:
         expanded = self._parent_expander.expand(
             session,
             children=children,
+            access_scope=access_scope,
         )
 
         return expanded[:limit]
@@ -184,8 +198,8 @@ class RetrievalService:
         queries: list[str],
         *,
         original_query: str,
+        access_scope: RetrievalAccessScope,
         limit: int = 5,
-        access_scope: RetrievalAccessScope | None = None,
         candidate_k: int | None = None,
         fusion: str = "rrf",
         rerank: bool = True,
@@ -225,11 +239,18 @@ class RetrievalService:
         children = fused[:limit]
 
         if rerank:
-            children = self._reranker.rerank(
-                query=original_query,
-                candidates=fused,
-                limit=limit,
-            )
+            try:
+                children = self._reranker.rerank(
+                    query=original_query,
+                    candidates=fused,
+                    limit=limit,
+                )
+            except (RuntimeError, ValueError, TypeError):
+                logger.exception(
+                    "reranker_failed_using_hybrid_order",
+                    extra={"candidate_count": len(fused), "limit": limit},
+                )
+                children = fused[:limit]
 
         if not parent_expansion:
             return children[:limit]
@@ -237,6 +258,7 @@ class RetrievalService:
         expanded = self._parent_expander.expand(
             session,
             children=children,
+            access_scope=access_scope,
         )
 
         return expanded[:limit]

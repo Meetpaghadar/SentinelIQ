@@ -4,11 +4,8 @@ import sys
 from time import perf_counter
 from uuid import UUID
 
-from sentineliq.contracts import (
-    GenerationRequest,
-    GenerationResult,
-    LLMProvider,
-)
+from sentineliq.auth.dependencies import resolve_authenticated_user
+from sentineliq.contracts import GenerationRequest, GenerationResult, LLMProvider
 from sentineliq.db.session import SessionLocal
 from sentineliq.decision import (
     JevDecisionProvider,
@@ -31,8 +28,8 @@ from sentineliq.querying import (
     QueryPlanner,
 )
 from sentineliq.rag.service import (
-    INSUFFICIENT_EVIDENCE_ANSWER,
     RAGService,
+    is_insufficient_evidence_answer,
 )
 from sentineliq.retrieval.service import (
     RetrievalService,
@@ -47,35 +44,6 @@ class CountingLLMProvider:
     def generate(self, request: GenerationRequest) -> GenerationResult:
         self.calls += 1
         return self._inner.generate(request)
-
-
-def _normalize(value: str) -> str:
-    return " ".join(value.split()).casefold()
-
-
-def _is_insufficient_evidence(answer: str) -> bool:
-    normalized = _normalize(answer)
-    expected = _normalize(INSUFFICIENT_EVIDENCE_ANSWER)
-
-    if normalized == expected:
-        return True
-
-    markers = (
-        "do not provide enough information",
-        "does not provide enough information",
-        "not enough information to answer",
-        "insufficient information to answer",
-        "insufficient evidence",
-        "cannot answer based on the available sources",
-        "cannot answer from the available sources",
-        "sources do not contain enough information",
-        "sources don't contain enough information",
-        "excerpts do not contain enough information",
-        "excerpts don't contain enough information",
-        "evidence does not contain enough information",
-    )
-
-    return any(marker in normalized for marker in markers)
 
 
 def _planner_for_mode(mode: str) -> QueryPlanner:
@@ -101,10 +69,11 @@ def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-id", required=True, type=UUID)
+    parser.add_argument("--user-id", required=True, type=UUID)
     parser.add_argument("--set", choices=("frozen", "harder"), default="frozen")
     parser.add_argument(
         "--mode",
-        choices=("baseline", "rewrite", "multi", "fusion", "hyde", "jev", "production"),
+        choices=("baseline", "rewrite", "multi", "fusion", "hyde", "jev"),
         default="baseline",
     )
     args = parser.parse_args()
@@ -127,6 +96,14 @@ def main() -> None:
     rag_latencies: list[float] = []
 
     with SessionLocal() as session:
+        authenticated_user = resolve_authenticated_user(
+            session,
+            user_id=args.user_id,
+            tenant_id=args.tenant_id,
+        )
+        if "knowledge:query" not in authenticated_user.permissions:
+            raise PermissionError("knowledge:query permission is required")
+
         for index, case in enumerate(cases, start=1):
             analysis = analyzer.analyze(case.question)
             plan = planner.plan(analysis)
@@ -139,12 +116,13 @@ def main() -> None:
                 session=session,
                 tenant_id=args.tenant_id,
                 question=case.question,
+                authorization=authenticated_user.authorization_context(),
             )
             rag_latency = perf_counter() - started
             rag_latencies.append(rag_latency)
 
             cited = [citation.document_title for citation in result.citations]
-            insufficient = _is_insufficient_evidence(result.answer)
+            insufficient = is_insufficient_evidence_answer(result.answer)
             expected = set(case.expected_documents)
 
             if case.answerable and expected:

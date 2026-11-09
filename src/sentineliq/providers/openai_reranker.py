@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 
 from sentineliq.contracts import (
     GenerationRequest,
@@ -21,7 +22,7 @@ class OpenAIRerankerProvider(RerankerProvider):
         self,
         *,
         query: str,
-        documents: list[str],
+        documents: Sequence[str],
     ) -> list[float]:
         if not documents:
             return []
@@ -66,46 +67,33 @@ class OpenAIRerankerProvider(RerankerProvider):
             text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         )
 
-        scores = [0.0 for _ in range(count)]
-
         try:
             data = json.loads(cleaned)
-        except json.JSONDecodeError:
-            return scores
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Reranker provider returned malformed JSON") from exc
 
-        if not isinstance(
-            data,
-            list,
-        ):
-            return scores
+        if not isinstance(data, list) or len(data) != count:
+            raise RuntimeError("Reranker provider returned incomplete scores")
 
+        scores: dict[int, float] = {}
         for item in data:
-            if not isinstance(
-                item,
-                dict,
-            ):
-                continue
+            if not isinstance(item, dict):
+                raise RuntimeError("Reranker provider returned an invalid score item")
 
             index = item.get("index")
 
             score = item.get("score")
 
-            if not isinstance(
-                index,
-                int,
-            ):
-                continue
+            if not isinstance(index, int) or isinstance(index, bool):
+                raise RuntimeError("Reranker provider returned an invalid index")
 
-            if not isinstance(
-                score,
-                (int, float),
-            ):
-                continue
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                raise RuntimeError("Reranker provider returned an invalid score")
 
-            if not (1 <= index <= count):
-                continue
+            if not (1 <= index <= count) or index in scores:
+                raise RuntimeError("Reranker provider returned an invalid index set")
 
-            scores[index - 1] = max(
+            scores[index] = max(
                 0.0,
                 min(
                     1.0,
@@ -113,4 +101,6 @@ class OpenAIRerankerProvider(RerankerProvider):
                 ),
             )
 
-        return scores
+        if len(scores) != count:
+            raise RuntimeError("Reranker provider returned incomplete scores")
+        return [scores[index] for index in range(1, count + 1)]

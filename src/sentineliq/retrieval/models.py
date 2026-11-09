@@ -21,6 +21,7 @@ class RetrievalResult:
     sparse_rank: int | None = None
 
     retrieval_method: str = "unknown"
+    child_chunk_id: UUID | None = None
 
     def with_updates(
         self,
